@@ -1,0 +1,189 @@
+name: Update Issue Form and Sync Metadata
+
+on:
+  workflow_dispatch: 
+  label:
+    types: [created]
+  issues:
+    types: [opened]
+
+jobs:
+  update-issue-form:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'label'
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Fetch Repository Labels
+        id: fetch-labels
+        env:
+          GITHUB_TOKEN: ${{ secrets.GHCRPASS }}
+        run: |
+          LABELS=$(gh api repos/${{ github.repository }}/labels --jq '.[].name' | jq -R -s -c 'split("\n")[:-1]' 2>/dev/null)
+          if [ -z "$LABELS" ]; then
+            echo "No labels found. Exiting..."
+            exit 1
+          fi
+          echo "labels=$LABELS" >> $GITHUB_ENV
+          echo "Fetched Labels: $LABELS"
+
+      - name: Generate Issue Form
+        run: |
+          # Create the issue form with proper YAML formatting
+          mkdir -p .github/ISSUE_TEMPLATE
+          
+          cat > .github/ISSUE_TEMPLATE/mandatory-fields.yml << 'EOL'
+          name: IOS-MCN-RAN Issue Template
+          description: Issues cannot be submitted without selecting at least one mandatory label.
+          title: "\u200B"
+          labels: []
+          body:
+            - type: markdown
+              attributes:
+                value: |
+                   Fill out all required fields below.
+            
+            - type: textarea
+              id: issue_details
+              attributes:
+                label: Issue Details
+                description: "Please fill out the template below with your issue details."
+                value: |
+                  **Issue/Feature Description:**
+
+
+                  **Why this issue to fixed / feature is needed (give scenarios or use cases):**
+
+
+                  **How to reproduce, in case of a bug:**
+
+
+                  **Other Notes / Environment Information:**
+
+              validations:
+                # required: true
+            
+            - type: markdown
+              attributes:
+                value: |
+                  ---
+                  ## Label Selection
+                  Please select the appropriate labels for this issue.
+            
+            - type: dropdown
+              id: mandatory_category
+              attributes:
+                label: Label
+                description: "MUST select one of the following categories for the issue."
+                options: 
+                  - "UNI"
+                  - "DIST"
+                  - "UNI-DIST-COMMON"
+                multiple: false
+              validations:
+                required: true
+                enum: 
+                  - "UNI"
+                  - "DIST"
+                  - "UNI-DIST-COMMON"
+                  
+            
+            - type: dropdown
+              id: additional_labels
+              attributes:
+                label: Additional Labels (Optional)
+                description: "Select any additional relevant labels for the issue."
+                options:
+          EOL
+          
+          # Append the dynamic labels
+          echo '${{ env.labels }}' | jq -r '.[] | "          - \"" + . + "\""' >> .github/ISSUE_TEMPLATE/mandatory-fields.yml
+          
+          # Append the rest of the form
+          cat >> .github/ISSUE_TEMPLATE/mandatory-fields.yml << 'EOL'
+                multiple: true
+              validations:
+                required: false
+          EOL
+
+      - name: Debug Generated File
+        run: |
+          echo "Generated file content:"
+          cat .github/ISSUE_TEMPLATE/mandatory-fields.yml
+          echo "---"
+          echo "Validating YAML:"
+          python3 -c "import yaml; yaml.safe_load(open('.github/ISSUE_TEMPLATE/mandatory-fields.yml'))" && echo "YAML is valid" || echo "YAML is invalid"
+
+      - name: Commit and Push Changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GHCRPASS }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/ISSUE_TEMPLATE/mandatory-fields.yml
+          if ! git diff --quiet --cached; then
+            git commit -m "Update issue form - labels after issue details [skip ci]"
+            git push
+          else
+            echo "No changes to commit"
+          fi
+
+  sync-labels:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues'
+    steps:
+      - name: Apply Labels to Issue
+        uses: actions/github-script@v6
+        with:
+          script: |
+            if (!context.payload.issue) {
+              console.log("No issue context available. Skipping label sync.");
+              return;
+            }
+            
+            console.log("Issue body:", context.payload.issue.body);
+            
+            const issueBody = context.payload.issue.body || '';
+            let labelsToApply = [];
+            
+            // Extract mandatory category
+            const mandatoryMatch = issueBody.match(/### Label\s*\n\n([^\n]+)/);
+              if (mandatoryMatch) {
+                const mandatoryCategory = mandatoryMatch[1].trim();
+                if (["UNI", "DIST", "UNI-DIST-COMMON"].includes(mandatoryCategory)) { // Validate against allowed labels
+                  labelsToApply.push(mandatoryCategory);
+                  console.log("Found mandatory category:", mandatoryCategory);
+                } else {
+                  console.log("Mandatory category is invalid or missing:", mandatoryCategory);
+                }
+              }
+            
+            // Extract additional labels
+            const additionalMatch = issueBody.match(/### Additional Labels \(Optional\)\s*\n\n([^\n]+)/);
+            if (additionalMatch) {
+              const additionalLabelsText = additionalMatch[1].trim();
+              if (additionalLabelsText && additionalLabelsText !== '_No response_') {
+                const additionalLabels = additionalLabelsText.split(/[,\n]/).map(label => label.trim()).filter(label => label);
+                labelsToApply.push(...additionalLabels);
+                console.log("Found additional labels:", additionalLabels);
+              }
+            }
+            
+            if (labelsToApply.length > 0) {
+              labelsToApply = labelsToApply.filter(label => label && label !== '_No response_');
+              labelsToApply = [...new Set(labelsToApply)];
+              
+              if (labelsToApply.length > 0) {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.payload.issue.number,
+                  labels: labelsToApply,
+                });
+                console.log("Applied labels:", labelsToApply);
+              }
+            } else {
+              console.log("No labels found in the issue body.");
+            }
