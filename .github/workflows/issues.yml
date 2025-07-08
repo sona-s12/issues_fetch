@@ -31,9 +31,8 @@ jobs:
 
       - name: Generate Issue Form
         run: |
-          # Create the issue form with proper YAML formatting
           mkdir -p .github/ISSUE_TEMPLATE
-          
+
           cat > .github/ISSUE_TEMPLATE/mandatory-fields.yml << 'EOL'
           name: IOS-MCN-RAN Issue Template
           description: Issues cannot be submitted without selecting at least one mandatory label.
@@ -43,8 +42,8 @@ jobs:
             - type: markdown
               attributes:
                 value: |
-                   Fill out all required fields below.
-            
+                  Fill out all required fields below.
+
             - type: textarea
               id: issue_details
               attributes:
@@ -53,43 +52,33 @@ jobs:
                 value: |
                   **Issue/Feature Description:**
 
-
                   **Why this issue to fixed / feature is needed (give scenarios or use cases):**
-
 
                   **How to reproduce, in case of a bug:**
 
-
                   **Other Notes / Environment Information:**
 
-              validations:
-                # required: true
-            
             - type: markdown
               attributes:
                 value: |
                   ---
                   ## Label Selection
                   Please select the appropriate labels for this issue.
-            
+
             - type: dropdown
               id: mandatory_category
               attributes:
                 label: Label
                 description: "MUST select one of the following categories for the issue."
                 options: 
+                  - "--- Select a Label ---"
                   - "UNI"
                   - "DIST"
                   - "UNI-DIST-COMMON"
                 multiple: false
               validations:
                 required: true
-                enum: 
-                  - "UNI"
-                  - "DIST"
-                  - "UNI-DIST-COMMON"
-                  
-            
+
             - type: dropdown
               id: additional_labels
               attributes:
@@ -97,11 +86,9 @@ jobs:
                 description: "Select any additional relevant labels for the issue."
                 options:
           EOL
-          
-          # Append the dynamic labels
+
           echo '${{ env.labels }}' | jq -r '.[] | "          - \"" + . + "\""' >> .github/ISSUE_TEMPLATE/mandatory-fields.yml
-          
-          # Append the rest of the form
+
           cat >> .github/ISSUE_TEMPLATE/mandatory-fields.yml << 'EOL'
                 multiple: true
               validations:
@@ -142,24 +129,38 @@ jobs:
               console.log("No issue context available. Skipping label sync.");
               return;
             }
-            
-            console.log("Issue body:", context.payload.issue.body);
-            
+
             const issueBody = context.payload.issue.body || '';
             let labelsToApply = [];
-            
+
             // Extract mandatory category
             const mandatoryMatch = issueBody.match(/### Label\s*\n\n([^\n]+)/);
-              if (mandatoryMatch) {
-                const mandatoryCategory = mandatoryMatch[1].trim();
-                if (["UNI", "DIST", "UNI-DIST-COMMON"].includes(mandatoryCategory)) { // Validate against allowed labels
-                  labelsToApply.push(mandatoryCategory);
-                  console.log("Found mandatory category:", mandatoryCategory);
-                } else {
-                  console.log("Mandatory category is invalid or missing:", mandatoryCategory);
-                }
+            let mandatoryCategory = "";
+            if (mandatoryMatch) {
+              mandatoryCategory = mandatoryMatch[1].trim();
+              if (["UNI", "DIST", "UNI-DIST-COMMON"].includes(mandatoryCategory)) {
+                labelsToApply.push(mandatoryCategory);
+                console.log("Valid mandatory category:", mandatoryCategory);
+              } else {
+                console.log("Invalid or missing mandatory category:", mandatoryCategory);
+
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: `This issue was automatically closed because a valid mandatory label was not selected.\n\nPlease reopen this issue and select one of the following in the "Label" dropdown:\n- UNI\n- DIST\n- UNI-DIST-COMMON`
+                });
+
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  state: "closed"
+                });
+                return;
               }
-            
+            }
+
             // Extract additional labels
             const additionalMatch = issueBody.match(/### Additional Labels \(Optional\)\s*\n\n([^\n]+)/);
             if (additionalMatch) {
@@ -167,23 +168,15 @@ jobs:
               if (additionalLabelsText && additionalLabelsText !== '_No response_') {
                 const additionalLabels = additionalLabelsText.split(/[,\n]/).map(label => label.trim()).filter(label => label);
                 labelsToApply.push(...additionalLabels);
-                console.log("Found additional labels:", additionalLabels);
               }
             }
-            
+
             if (labelsToApply.length > 0) {
-              labelsToApply = labelsToApply.filter(label => label && label !== '_No response_');
-              labelsToApply = [...new Set(labelsToApply)];
-              
-              if (labelsToApply.length > 0) {
-                await github.rest.issues.addLabels({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: context.payload.issue.number,
-                  labels: labelsToApply,
-                });
-                console.log("Applied labels:", labelsToApply);
-              }
-            } else {
-              console.log("No labels found in the issue body.");
+              labelsToApply = [...new Set(labelsToApply.filter(label => label !== '_No response_'))];
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                labels: labelsToApply,
+              });
             }
