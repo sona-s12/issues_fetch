@@ -71,7 +71,7 @@ jobs:
                 label: Label
                 description: "MUST select one of the following categories for the issue."
                 options: 
-                  - "--- Select a Label ---"
+                  - ""
                   - "UNI"
                   - "DIST"
                   - "UNI-DIST-COMMON"
