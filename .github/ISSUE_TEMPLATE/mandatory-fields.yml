@@ -6,8 +6,8 @@ body:
   - type: markdown
     attributes:
       value: |
-         Fill out all required fields below.
-  
+        Fill out all required fields below.
+
   - type: textarea
     id: issue_details
     attributes:
@@ -16,43 +16,33 @@ body:
       value: |
         **Issue/Feature Description:**
 
-
         **Why this issue to fixed / feature is needed (give scenarios or use cases):**
-
 
         **How to reproduce, in case of a bug:**
 
-
         **Other Notes / Environment Information:**
 
-    validations:
-      # required: true
-  
   - type: markdown
     attributes:
       value: |
         ---
         ## Label Selection
         Please select the appropriate labels for this issue.
-  
+
   - type: dropdown
     id: mandatory_category
     attributes:
       label: Label
       description: "MUST select one of the following categories for the issue."
       options: 
+        - "--- Select a Label ---"
         - "UNI"
         - "DIST"
         - "UNI-DIST-COMMON"
       multiple: false
     validations:
       required: true
-      enum: 
-        - "UNI"
-        - "DIST"
-        - "UNI-DIST-COMMON"
-        
-  
+
   - type: dropdown
     id: additional_labels
     attributes:
